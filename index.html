@@ -1,1 +1,286 @@
-this is a test refresh
+<!-- 
+  White Star Cartographer Tool for Panda Clan
+  Created by Concedo
+  Powered by Leaflet js
+  
+  Measurement accuracy may depend on performing proper calibration. 
+  Panda Clan takes no responsibility for the loss of your miners, transports or battleships as a result of the use of this tool.
+  -->
+
+<!DOCTYPE html>
+<html>
+<head>
+	
+	<title>White Star Cartographer for Panda Clan</title>
+
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />	
+	<link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="leaflet.css"/>
+    <script src="leaflet.js"></script>
+
+
+	<style>
+		body {
+			padding: 0;
+			margin: 0;
+		}
+		html, body, #map {
+			height: 100%;
+			width: 100vw;			
+		}
+		#map
+		{				
+			height: 80%;
+		};
+	
+		.button {
+		  background-color: #4CAF50; /* Green */
+		  border: none;
+		  color: white;
+		  padding: 8px 16px;
+		  text-align: center;
+		  text-decoration: none;
+		  display: inline-block;
+		  font-size: 14px;
+		  margin: 4px 2px;
+		  -webkit-transition-duration: 0.4s; /* Safari */
+		  transition-duration: 0.4s;
+		  cursor: pointer;
+		}
+		.button1 {
+		  background-color: white; 
+		  color: black; 
+		  border: 2px solid #4CAF50;
+		}
+
+		.button1:hover {
+		  background-color: #4CAF50;
+		  color: white;
+		}
+		
+		.infobox {
+			padding: 6px 8px;
+			font: 14px/16px Arial, Helvetica, sans-serif;
+			background: white;
+			background: rgba(255,255,255,0.8);
+			box-shadow: 0 0 15px rgba(0,0,0,0.2);
+			border-radius: 5px;
+		}
+		.infobox h4 {
+			margin: 0 0 5px;
+			color: #777;
+		}
+
+	</style>
+
+	
+</head>
+<body>
+
+<p style="text-align:center" id='info'>Step 1: Load a screenshot of the white star</p>
+<div style="text-align:center">
+<button id='uploadbtn' class="button button1">Select White Star Screenshot</button>
+</div>
+<div id='map' style='display: none'>
+<img id='origimg' style='display:none' src='' />
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=UA-118985442-3"></script>
+<script>
+	window.dataLayer = window.dataLayer || [];
+	function gtag(){dataLayer.push(arguments);}
+	gtag('js', new Date());
+	gtag('config', 'UA-118985442-3');
+  
+	var ResetPoints = function()
+	{			
+		pts = [];
+		document.getElementById('info2').innerHTML = "";				
+		for(var i = 0; i < lines.length; i++){
+			map.removeLayer(lines[i]);
+		}
+		map.closePopup();
+	};
+	var yx = L.latLng;
+	var xy = function(x, y) {
+		if (L.Util.isArray(x)) {    // When doing xy([x, y]);
+			return yx(x[1], x[0]);
+		}
+		return yx(y, x);  // When doing xy(x, y);
+	};
+
+	var p1 = xy(-1, -1);
+	var p2 = xy(-1, -1);
+	var p1set = false;
+	var p2set = false;
+	var pts = [];
+	var lines = [];
+	var map = L.map('map', {
+				crs: L.CRS.Simple,
+				minZoom: -3
+			});
+			
+	var knownmultiplier = 4.348; //value empirically determined to get 500AU across one ws sector's long diagonal
+	var knowncalibrationdistance = 500; //known calibration distance is 500AU per sector diagonal. it's short but its easy to perform
+	var calibrationMeasured = 0; //to compare ratio to our measurements
+	
+	//vessel speeds in au per second
+	var minerspeed = 43.2/3600;
+	var tsspeed = 57.6/3600;
+	var bsspeed = 60/3600;
+	var rocketspeed = 132/3600;
+			
+	var infobox = L.control();
+
+	infobox.onAdd = function (map) {
+		this._div = L.DomUtil.create('div', 'infobox'); // create a div with a class "info"
+		this.update();
+		return this._div;
+	};
+
+	// method that we will use to update the control based on feature properties passed
+	infobox.update = function (props) {
+		this._div.innerHTML = '<p id=\"info2\"></p>';			
+	};
+
+	infobox.addTo(map);
+	
+	function showUpload()
+	{
+		var imgUploadInput = document.getElementById('ImageUploaderInput');
+		if (!imgUploadInput) 
+		{
+		  var fileInput = document.createElement('input');
+		  fileInput.setAttribute('type', 'file');	 
+		  fileInput.setAttribute("accept","image/png,image/jpeg" );
+		  
+		  fileInput.setAttribute('id', 'ImageUploaderInput');
+		  fileInput.style.visibility = 'hidden';
+		  fileInput.onclick = function (event) {
+			this.value = null;
+		  };
+		  fileInput.onchange = function (event) {
+			var origimg = document.getElementById('origimg');
+			origimg.src = URL.createObjectURL(event.target.files[0]);
+			processImage();
+		  }
+		  document.body.appendChild(fileInput);
+		}
+		else
+		{
+			imgUploadInput.setAttribute("accept","image/png,image/jpeg" );	
+		}
+		var OpenFileDialog = function() {
+		  document.getElementById('ImageUploaderInput').click();
+		};
+						
+		document.getElementById('uploadbtn').addEventListener('click', OpenFileDialog, false);
+		
+	};
+	
+	function distance(x1,y1,x2,y2)
+	{
+		var d1 = x2-x1;
+		var d2 = y2-y1;
+		return Math.sqrt((d1*d1) + (d2*d2));
+	}
+	
+	function secondsToHms(d) {
+		d = Number(d);
+		var h = Math.floor(d / 3600);
+		var m = Math.floor(d % 3600 / 60);
+		var s = Math.floor(d % 3600 % 60);
+
+		var hDisplay = h > 0 ? h + (h == 1 ? " hour, " : " hours, ") : "";
+		var mDisplay = m > 0 ? m + (m == 1 ? " minute, " : " minutes, ") : "";
+		var sDisplay = s > 0 ? s + (s == 1 ? " second" : " seconds") : "";
+		return hDisplay + mDisplay + sDisplay; 
+	}
+	
+	function processImage()
+	{
+		document.getElementById('map').style.display = "";
+		document.getElementById('uploadbtn').style.display = "none";
+		document.getElementById('info').innerHTML = "Step 2 (Calibration): Click on one corner at the edge of any sector. <a href='images/instruct1.png' target='_blank'>(Need Help?)</a>";
+	
+		var img = document.getElementById('origimg');
+		img.onload = function()
+		{
+
+			var bounds = [xy(0, 0), xy(img.width, img.height)];
+			var image = L.imageOverlay(document.getElementById('origimg').src, bounds).addTo(map);
+
+			 
+			
+			var popup = L.popup();
+			function onMapClick(e) {
+				if(!p1set)
+				{
+					p1set = true;
+					p1 = e.latlng;
+					popup
+					.setLatLng(e.latlng)
+					.setContent("Calibration Point 1 Set")
+					.openOn(map);
+					
+					document.getElementById('info').innerHTML = "Step 3 (Calibration): Now click on the corner directly opposite to the first corner in the same sector. <a href='images/instruct2.png' target='_blank'>(Need Help?)</a>";
+				}
+				else if(!p2set)
+				{
+					p2set = true;
+					p2 = e.latlng;
+					
+					calibrationMeasured = distance(p1.lat,p1.lng,p2.lat,p2.lng) * knownmultiplier;
+					
+					popup
+					.setLatLng(e.latlng)
+					.setContent("Calibration Point 2 Set")
+					.openOn(map);
+					
+					document.getElementById('info').innerHTML = "If calibrated correctly, each sector should be 500AU diagonally.<br>You can now measure distances on the map by adding waypoints.<br><a href='#' onclick=ResetPoints()>Click HERE to Reset Waypoints.</a>";					
+				}
+				else
+				{							
+					
+					if(pts.length>0)
+					{
+						var travel = L.polyline([pts[pts.length-1], e.latlng]).addTo(map);	
+						lines.push(travel);
+					}		
+					pts.push(e.latlng);	
+
+					var dist = 0;
+					for(var i=1;i<pts.length;++i)
+					{
+						dist += distance(pts[i].lat,pts[i].lng,pts[i-1].lat,pts[i-1].lng);
+					}
+					
+				    //scale according to calibration values
+					var calibrationscale = calibrationMeasured/knowncalibrationdistance;
+					
+					dist = dist * knownmultiplier / calibrationscale;	
+					
+					document.getElementById('info2').innerHTML = "Total Distance: "+dist.toFixed(1)+" AU<br><br><b>Total Transit Time (without mods): </b>"+
+					"<br>Transport - "+secondsToHms(dist/tsspeed)+"<br>Miner - "+secondsToHms(dist/minerspeed)+"<br>Battleship - "+secondsToHms(dist/bsspeed)+"<br>Alpha Rocket - "+secondsToHms(dist/rocketspeed)+"<br>";					
+									
+					popup
+					.setLatLng(e.latlng)
+					.setContent("Waypoint " + pts.length)
+					.openOn(map);
+				}					
+			
+			}
+
+			map.on('click', onMapClick);
+			
+			map.setView(xy(img.width/2, img.height/2), 0.2);
+		}
+	};
+	
+	showUpload();
+
+</script>
+
+
+</body>
+</html>
